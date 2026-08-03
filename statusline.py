@@ -1,13 +1,17 @@
 #!/usr/bin/env python3
-"""Claude Code status line: model / context / tokens / cache hit rate.
-读取 Claude Code 传入的 JSON，显示模型名、上下文使用率、会话 token 用量、缓存命中率。
+"""Claude Code status line: model / context / tokens / cache hit rate / cost.
+按 session_id 把每轮用量累加到本地状态文件，显示【当前对话】的累计数据；
+新开对话（新 session_id）自动从零累计。缓存读取 token 单独计费，不混入输入。
 """
 import json
+import os
 import sys
 from datetime import datetime, timedelta, timezone
 
 # Windows 下强制 UTF-8 输出，避免 ¥ 等符号因 GBK 报错
 sys.stdout.reconfigure(encoding="utf-8")
+
+STATE_FILE = os.path.expanduser("~/.claude/statusline-state.json")
 
 try:
     data = json.load(sys.stdin)
@@ -16,15 +20,13 @@ except Exception:
     sys.exit(0)
 
 model = (data.get("model") or {}).get("display_name") or "Unknown"
+session_id = data.get("session_id") or "default"
 
 cw = data.get("context_window") or {}
 used_pct = cw.get("used_percentage")
-total_in = cw.get("total_input_tokens") or 0
-total_out = cw.get("total_output_tokens") or 0
-
-# 当前轮次的缓存数据（DeepSeek 自动上下文缓存会映射到这里）
 cu = cw.get("current_usage") or {}
 cur_in = cu.get("input_tokens") or 0
+cur_out = cu.get("output_tokens") or 0
 cache_read = cu.get("cache_read_input_tokens") or 0
 cache_create = cu.get("cache_creation_input_tokens") or 0
 
@@ -47,7 +49,7 @@ def is_peak_hour():
 
 
 def calc_cost(model_name, cur_in, cache_read, cache_create, cur_out):
-    """本轮精确费用：新输入 + 缓存读取（低价） + 缓存写入 + 输出"""
+    """费用：新输入 + 缓存读取（低价） + 缓存写入 + 输出"""
     key = "flash" if "flash" in model_name.lower() else "pro"
     price = PRICES[key]
     mult = 2.0 if is_peak_hour() else 1.0
@@ -55,23 +57,48 @@ def calc_cost(model_name, cur_in, cache_read, cache_create, cur_out):
     return raw * mult / 1_000_000
 
 
+# ---- 会话累计：把每轮用量按 session_id 累加到本地状态文件 ----
+def load_state():
+    try:
+        with open(STATE_FILE, encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+def save_state(state):
+    try:
+        with open(STATE_FILE, "w", encoding="utf-8") as f:
+            json.dump(state, f)
+    except Exception:
+        pass
+
+
+state = load_state()
+if session_id not in state:
+    # 新会话：只保留最近 4 个旧会话记录，避免文件无限增长
+    state = {k: v for k, v in list(state.items())[-4:]}
+s = state.setdefault(session_id, {"in": 0, "out": 0, "cache_read": 0, "cache_create": 0})
+s["in"] += cur_in
+s["out"] += cur_out
+s["cache_read"] += cache_read
+s["cache_create"] += cache_create
+save_state(state)
+
+# ---- 显示：全部为当前对话累计口径 ----
 parts = []
 if used_pct is not None:
     parts.append(f"ctx:{used_pct:.0f}%")
 
-# tok 显示本轮真实新增输入 + 输出（total_input_tokens 含缓存读取，会误导）
-cur_out = cu.get("output_tokens") or 0
-if cur_in + cur_out > 0:
-    parts.append(f"tok:{fmt_k(cur_in)}+{fmt_k(cur_out)}")
+if s["in"] + s["out"] > 0:
+    parts.append(f"tok:{fmt_k(s['in'])}+{fmt_k(s['out'])}")
 
-# 缓存命中率 = 缓存读取 / (本次输入 + 缓存读取 + 缓存写入)
-total_cur = cur_in + cache_read + cache_create
+total_cur = s["in"] + s["cache_read"] + s["cache_create"]
 if total_cur > 0:
-    rate = cache_read * 100 / total_cur
+    rate = s["cache_read"] * 100 / total_cur
     parts.append(f"cache:{rate:.0f}%")
 
-# 本轮精确费用（缓存按低价计）
-cost = calc_cost(model, cur_in, cache_read, cache_create, cur_out)
+cost = calc_cost(model, s["in"], s["cache_read"], s["cache_create"], s["out"])
 if cost > 0:
     parts.append(f"cost:¥{cost:.3f}" if cost < 1 else f"cost:¥{cost:.2f}")
 
