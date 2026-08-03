@@ -35,8 +35,8 @@ def fmt_k(n):
 
 # DeepSeek V4 定价（元 / 百万 token），2026-07 起施行峰谷定价
 PRICES = {
-    "pro":   {"in": 3.0, "out": 6.0},
-    "flash": {"in": 1.0, "out": 2.0},
+    "pro":   {"in": 3.0, "out": 6.0, "cache": 0.025},
+    "flash": {"in": 1.0, "out": 2.0, "cache": 0.02},
 }
 
 
@@ -46,18 +46,23 @@ def is_peak_hour():
     return now.hour in (9, 10, 11, 14, 15, 16, 17)
 
 
-def calc_cost(model_name, total_in, total_out):
+def calc_cost(model_name, cur_in, cache_read, cache_create, cur_out):
+    """本轮精确费用：新输入 + 缓存读取（低价） + 缓存写入 + 输出"""
     key = "flash" if "flash" in model_name.lower() else "pro"
     price = PRICES[key]
     mult = 2.0 if is_peak_hour() else 1.0
-    return (total_in * price["in"] + total_out * price["out"]) * mult / 1_000_000
+    raw = (cur_in + cache_create) * price["in"] + cache_read * price["cache"] + cur_out * price["out"]
+    return raw * mult / 1_000_000
 
 
 parts = []
 if used_pct is not None:
     parts.append(f"ctx:{used_pct:.0f}%")
-if total_in + total_out > 0:
-    parts.append(f"tok:{fmt_k(total_in)}+{fmt_k(total_out)}")
+
+# tok 显示本轮真实新增输入 + 输出（total_input_tokens 含缓存读取，会误导）
+cur_out = cu.get("output_tokens") or 0
+if cur_in + cur_out > 0:
+    parts.append(f"tok:{fmt_k(cur_in)}+{fmt_k(cur_out)}")
 
 # 缓存命中率 = 缓存读取 / (本次输入 + 缓存读取 + 缓存写入)
 total_cur = cur_in + cache_read + cache_create
@@ -65,7 +70,8 @@ if total_cur > 0:
     rate = cache_read * 100 / total_cur
     parts.append(f"cache:{rate:.0f}%")
 
-cost = calc_cost(model, total_in, total_out)
+# 本轮精确费用（缓存按低价计）
+cost = calc_cost(model, cur_in, cache_read, cache_create, cur_out)
 if cost > 0:
     parts.append(f"cost:¥{cost:.3f}" if cost < 1 else f"cost:¥{cost:.2f}")
 

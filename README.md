@@ -12,9 +12,9 @@ Claude Code 状态栏（statusline）小工具：在 CLI 底部实时显示**模
 |---|---|
 | 模型名 | 当前使用的模型 |
 | ctx:XX% | 上下文窗口使用率 |
-| tok:Xk+Yk | 会话累计输入 + 输出 token |
+| tok:Xk+Yk | 本轮新增输入 + 输出 token（不含缓存读取） |
 | cache:XX% | 本轮请求的缓存命中率（越高越省） |
-| cost:¥X.XX | 会话累计花费（按 DeepSeek 定价估算） |
+| cost:¥X.XX | 本轮花费（缓存命中按低价计费，DeepSeek 定价估算） |
 
 - 纯 Python 实现，无需 jq / bc，Windows / macOS / Linux 通用
 - 自动识别模型（deepseek-v4-pro / deepseek-v4-flash）切换定价
@@ -87,7 +87,8 @@ echo '{}' | python ~/.claude/statusline.py
 | deepseek-v4-pro | 3 | 6 | 是 |
 | deepseek-v4-flash | 1 | 2 | 是 |
 
-> 缓存命中部分的费用极低（约 0.02-0.025 元/百万 token），且会话累计的缓存 token 数无法从状态栏 JSON 获取，故忽略不计（误差 <1%）。
+> `tok` 与 `cost` 均为**本轮**口径（状态栏 JSON 的会话累计输入 `total_input_tokens` 包含缓存读取，会严重高估，故不使用）。
+> 缓存命中部分按官方低价（0.02-0.025 元/百万 token）单独计费。
 > 官方调价后，请更新脚本中的 `PRICES` 字典。
 
 ## 安全提示
