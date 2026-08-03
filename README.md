@@ -21,10 +21,22 @@ Claude Code 状态栏（statusline）小工具：在 CLI 底部实时显示**模
 - 自动识别 DeepSeek 高峰时段（北京时间 9:00-12:00、14:00-18:00，价格 ×2）
 - 数据全部本地计算，不上传任何信息
 
-## 安装
+## 安装（三步）
 
-1. 将 `statusline.py` 放到 `~/.claude/` 目录
-2. 编辑 `~/.claude/settings.json`，添加：
+### 第 1 步：下载脚本
+
+方式 A（推荐，以后升级直接 `git pull`）：
+
+```bash
+git clone https://github.com/wengshukai/cc-usage-line.git
+cp cc-usage-line/statusline.py ~/.claude/
+```
+
+方式 B（懒得 clone，直接下载文件）：打开仓库页面点 `statusline.py` → Raw，另存到 `~/.claude/` 目录。
+
+### 第 2 步：配置 settings.json
+
+编辑 `~/.claude/settings.json`，加入：
 
 ```json
 "statusLine": {
@@ -33,9 +45,38 @@ Claude Code 状态栏（statusline）小工具：在 CLI 底部实时显示**模
 }
 ```
 
-> macOS / Linux 使用 `python3 ~/.claude/statusline.py`，路径按实际环境修改
+不同系统对应写法：
 
-3. 重启 Claude Code 生效
+| 系统 | command 写法 |
+|---|---|
+| Windows | `python C:/Users/你的用户名/.claude/statusline.py` |
+| macOS / Linux | `python3 ~/.claude/statusline.py` |
+
+### 第 3 步：重启 Claude Code
+
+底部状态栏即生效，显示效果：
+
+```
+[deepseek-v4-pro ctx:12% tok:8.3k+1.2k cache:83% cost:¥0.032]
+```
+
+## 验证安装
+
+```bash
+echo '{}' | python ~/.claude/statusline.py
+```
+
+- 输出 `[Unknown]` → 安装成功（正式使用时显示真实数据）
+- 输出红色报错 → 检查 Python 是否在 PATH 中
+
+## 常见问题
+
+| 现象 | 原因 | 解决 |
+|---|---|---|
+| 不显示 `cache:` 字段 | 模型端点没返回缓存数据（非 DeepSeek 端点常见） | 换官方 DeepSeek Anthropic 端点，或忽略 |
+| 显示 `Unknown` 模型名 | Claude Code 版本旧，状态栏数据不完整 | 升级 Claude Code |
+| 金额显示 `¥0.000` | 会话刚开始 token 少，或用的非 DeepSeek 模型 | 正常，多聊几轮再看 |
+| 想自定义模型 / 定价 | 编辑脚本里的 `PRICES` 字典 | 见下方定价说明 |
 
 ## 定价说明
 
