@@ -78,6 +78,12 @@ echo '{}' | python ~/.claude/statusline.py
 | 金额显示 `¥0.000` | 会话刚开始 token 少，或用的非 DeepSeek 模型 | 正常，多聊几轮再看 |
 | 想自定义模型 / 定价 | 编辑脚本里的 `PRICES` 字典 | 见下方定价说明 |
 
+> **Q：`cost` 为什么不是从我的第一条消息开始算？**
+>
+> 脚本的累计从启用状态栏那一刻开始（每次响应后按 `session_id` 累加到 `~/.claude/statusline-state.json`），之前的历史账单不会自动包含。
+>
+> 如果想回算历史对话的完整账单：读取 `~/.claude/projects/<项目目录>/<session_id>.jsonl`，累加每条 assistant 消息的 `usage` 字段（`input_tokens` / `output_tokens` / `cache_read_input_tokens` / `cache_creation_input_tokens`），再按 `PRICES` 定价换算即可。注意 transcript 中 resume 重放的记录会出现重复 usage，需按消息 ID 去重。
+
 ## 定价说明
 
 脚本内置 DeepSeek V4 定价（2026-07 峰谷定价机制，元/百万 token）：
