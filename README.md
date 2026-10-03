@@ -3,38 +3,42 @@
 Claude Code 状态栏（statusline）小工具：在 CLI 底部实时显示**模型、上下文使用率、token 用量、缓存命中率、花费金额**。
 
 ```
-[deepseek-v4-pro ctx:12% tok:8.3k+1.2k cache:83% cost:¥0.032]
+[deepseek-flash[1m] ctx:23.2% ↑249.8k ↓193.5k cache:98.6% cost:¥1.37]
 ```
 
-## 功能
+## 字段说明
 
 | 字段 | 含义 |
 |---|---|
 | 模型名 | 当前使用的模型 |
-| ctx:XX% | 上下文窗口使用率 |
-| tok:Xk+Yk | 当前对话累计新增输入 + 输出 token（不含缓存读取） |
-| cache:XX% | 当前对话累计缓存命中率（越高越省） |
+| ctx:XX.X% | 上下文占用，与 `/context` 命令同口径（分母为 auto-compact 窗口：1M 模型 = 786432，即 `/context` 里显示的 "786.4k"），精确到 0.1% |
+| ↑Xk ↓Xk | 当前对话累计输入（↑，不含缓存读取）/ 输出（↓）token |
+| cache:XX.X% | 当前对话累计缓存命中率（越高越省） |
 | cost:¥X.XX | 当前对话累计花费（缓存命中按低价计费） |
 
 - 纯 Python 实现，无需 jq / bc，Windows / macOS / Linux 通用
-- 自动识别模型（deepseek-v4-pro / deepseek-v4-flash）切换定价
-- 自动识别 DeepSeek 高峰时段（北京时间 9:00-12:00、14:00-18:00，价格 ×2）
+- 自动识别模型（deepseek-flash / deepseek-v4-pro）切换定价
+- 自动识别 DeepSeek 峰谷时段：**周一至周五**（不含法定节假日）北京时间 9:00-12:00、14:00-18:00 价格 ×2，**周末全天按空闲价**
 - 数据全部本地计算，不上传任何信息
 
-## 安装（三步）
+## 安装
 
-### 第 1 步：下载脚本
+### 方式 A：一键安装脚本（Windows，推荐）
 
-方式 A（推荐，以后升级直接 `git pull`）：
+下载 / clone 本仓库后双击 `install.bat`，自动完成「复制脚本到 `~/.claude/`」+「写入 settings.json」（原配置自动备份为 `settings.json.bak`），重启 Claude Code 即生效。
+
+### 方式 B：手动安装（三步）
+
+**第 1 步：下载脚本**
 
 ```bash
 git clone https://github.com/wengshukai/cc-usage-line.git
 cp cc-usage-line/statusline.py ~/.claude/
 ```
 
-方式 B（懒得 clone，直接下载文件）：打开仓库页面点 `statusline.py` → Raw，另存到 `~/.claude/` 目录。
+（或打开仓库页面点 `statusline.py` → Raw，另存到 `~/.claude/` 目录。）
 
-### 第 2 步：配置 settings.json
+**第 2 步：配置 settings.json**
 
 编辑 `~/.claude/settings.json`，加入：
 
@@ -45,20 +49,14 @@ cp cc-usage-line/statusline.py ~/.claude/
 }
 ```
 
-不同系统对应写法：
-
 | 系统 | command 写法 |
 |---|---|
 | Windows | `python C:/Users/你的用户名/.claude/statusline.py` |
 | macOS / Linux | `python3 ~/.claude/statusline.py` |
 
-### 第 3 步：重启 Claude Code
+**第 3 步：重启 Claude Code**
 
-底部状态栏即生效，显示效果：
-
-```
-[deepseek-v4-pro ctx:12% tok:8.3k+1.2k cache:83% cost:¥0.032]
-```
+底部状态栏即生效。
 
 ## 验证安装
 
@@ -76,6 +74,7 @@ echo '{}' | python ~/.claude/statusline.py
 | 不显示 `cache:` 字段 | 模型端点没返回缓存数据（非 DeepSeek 端点常见） | 换官方 DeepSeek Anthropic 端点，或忽略 |
 | 显示 `Unknown` 模型名 | Claude Code 版本旧，状态栏数据不完整 | 升级 Claude Code |
 | 金额显示 `¥0.000` | 会话刚开始 token 少，或用的非 DeepSeek 模型 | 正常，多聊几轮再看 |
+| `ctx` 与 `/context` 差 0~1 个百分点 | 状态栏用 API 实测 token（最近一轮调用），`/context` 用本地估算（敲命令那一刻），两边天然有微小出入 | 正常现象（口径已一致：同除 auto-compact 窗口） |
 | 想自定义模型 / 定价 | 编辑脚本里的 `PRICES` 字典 | 见下方定价说明 |
 
 > **Q：`cost` 为什么不是从我的第一条消息开始算？**
@@ -86,16 +85,32 @@ echo '{}' | python ~/.claude/statusline.py
 
 ## 定价说明
 
-脚本内置 DeepSeek V4 定价（2026-07 峰谷定价机制，元/百万 token）：
+脚本内置 DeepSeek 官方定价（元/百万 token，**空闲时段**；高峰时段价格 ×2）：
 
-| 模型 | 输入（缓存未命中） | 输出 | 高峰 ×2 |
+| 模型 | 输入·缓存命中 | 输入·未命中 | 输出 |
 |---|---|---|---|
-| deepseek-v4-pro | 3 | 6 | 是 |
-| deepseek-v4-flash | 1 | 2 | 是 |
+| deepseek-flash | 0.02 | 1 | 4 |
+| deepseek-v4-pro | 0.15 | 4.5 | 13.5 |
 
-> 统计口径为**当前对话累计**：脚本每次被调用时把本轮用量按 `session_id` 累加到本地状态文件（`~/.claude/statusline-state.json`），新开对话自动从零累计。
-> 状态栏 JSON 的会话累计输入 `total_input_tokens` 包含缓存读取，会严重高估，故不使用；缓存命中部分按官方低价（0.02-0.025 元/百万 token）单独计费。
-> 官方调价后，请更新脚本中的 `PRICES` 字典。
+> 高峰时段为**周一至周五**（不含中国法定节假日）北京时间 9:00-12:00、14:00-18:00；其余时间（含周末及法定节假日全天）为空闲时段。
+> 来源：https://api-docs.deepseek.com/zh-cn/quick_start/pricing（2026-10 核对）。官方调价后，请更新脚本中的 `PRICES` 字典。
+
+**统计口径**（当前对话累计）：脚本每次被调用时把本轮用量按 `session_id` 累加到本地状态文件（`~/.claude/statusline-state.json`），新开对话自动从零累计。状态栏 JSON 的会话累计输入 `total_input_tokens` 包含缓存读取，会严重高估，故不使用；缓存命中部分按官方低价单独计费。
+
+**ctx 口径**：用最近一次 API 调用的输入侧 token 除以 auto-compact 窗口（1M 模型 = 786432，约为名义窗口的 75%，这正是 `/context` 显示的分母；Claude Code 官方对状态栏的 `used_percentage` 是除以名义窗口 1M 且取整，故此处自行重算以对齐 `/context` 并保留 0.1% 精度）。如需跟随自定义的 auto-compact 设置，可通过环境变量 `CLAUDE_CODE_AUTO_COMPACT_WINDOW` 覆盖。
+
+## 文件说明
+
+| 文件 | 作用 |
+|---|---|
+| `statusline.py` | 状态栏脚本本体 |
+| `install.py` | 安装脚本（复制 + 写配置，自动备份原 settings.json） |
+| `install.bat` | Windows 双击运行安装 |
+| `README.md` | 本文档 |
+
+## 卸载
+
+从 `settings.json` 删掉 `statusLine` 字段，再删除 `~/.claude/statusline.py`（及 `~/.claude/statusline-state.json`）即可。
 
 ## 安全提示
 

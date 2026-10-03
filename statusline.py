@@ -2,6 +2,8 @@
 """Claude Code status line: model / context / tokens / cache hit rate / cost.
 按 session_id 把每轮用量累加到本地状态文件，显示【当前对话】的累计数据；
 新开对话（新 session_id）自动从零累计。缓存读取 token 单独计费，不混入输入。
+ctx 与 /context 的百分比对齐：分子为最近一次 API 调用的输入侧 token，
+分母为其 "Auto-compact window"（见 auto_compact_window()）。
 """
 import json
 import os
@@ -35,17 +37,19 @@ def fmt_k(n):
     return f"{n / 1000:.1f}k" if n >= 1000 else str(n)
 
 
-# DeepSeek V4 定价（元 / 百万 token），2026-07 起施行峰谷定价
+# DeepSeek 官方定价（元 / 百万 token，此处为空闲时段价，高峰时段 ×2）
+# 来源：https://api-docs.deepseek.com/zh-cn/quick_start/pricing（2026-10 核对）
 PRICES = {
-    "pro":   {"in": 3.0, "out": 6.0, "cache": 0.025},
-    "flash": {"in": 1.0, "out": 2.0, "cache": 0.02},
+    "pro":   {"in": 4.5, "out": 13.5, "cache": 0.15},
+    "flash": {"in": 1.0, "out": 4.0,  "cache": 0.02},
 }
 
 
 def is_peak_hour():
-    """高峰时段（北京时间 9:00-12:00、14:00-18:00）价格为平时 2 倍"""
+    """高峰时段：周一至周五（不含法定节假日）北京时间 9:00-12:00、14:00-18:00，
+    价格为空闲时段 2 倍；周末全天按空闲计（法定节假日未处理，一年仅十余天）"""
     now = datetime.now(timezone(timedelta(hours=8)))
-    return now.hour in (9, 10, 11, 14, 15, 16, 17)
+    return now.weekday() < 5 and now.hour in (9, 10, 11, 14, 15, 16, 17)
 
 
 def calc_cost(model_name, cur_in, cache_read, cache_create, cur_out):
@@ -55,6 +59,16 @@ def calc_cost(model_name, cur_in, cache_read, cache_create, cur_out):
     mult = 2.0 if is_peak_hour() else 1.0
     raw = (cur_in + cache_create) * price["in"] + cache_read * price["cache"] + cur_out * price["out"]
     return raw * mult / 1_000_000
+
+
+# ---- ctx 分母：与 /context 的 "Auto-compact window" 对齐 ----
+# 实测 1M 模型为 786432（= 1Mi × 75%，/context 显示 "786.4k"），其他窗口按同比例换算。
+# 支持 CLAUDE_CODE_AUTO_COMPACT_WINDOW 环境变量覆盖（与 Claude Code 同名机制）。
+def auto_compact_window(size):
+    env = (os.environ.get("CLAUDE_CODE_AUTO_COMPACT_WINDOW") or "").strip()
+    if env.isdigit() and int(env) > 0:
+        return int(env)
+    return round(size / 1_000_000 * 1_048_576 * 0.75)
 
 
 # ---- 会话累计：把每轮用量按 session_id 累加到本地状态文件 ----
@@ -87,16 +101,21 @@ save_state(state)
 
 # ---- 显示：全部为当前对话累计口径 ----
 parts = []
-if used_pct is not None:
-    parts.append(f"ctx:{used_pct:.0f}%")
+# ctx 用原始 token 数自算（stdin 的 used_percentage 已被 SDK 取整，达不到 0.1% 精度）
+ctx_used = cur_in + cache_create + cache_read
+size = cw.get("context_window_size")
+if size and ctx_used > 0:
+    parts.append(f"ctx:{ctx_used / auto_compact_window(size) * 100:.1f}%")
+elif used_pct is not None:
+    parts.append(f"ctx:{used_pct:.1f}%")
 
 if s["in"] + s["out"] > 0:
-    parts.append(f"tok:{fmt_k(s['in'])}+{fmt_k(s['out'])}")
+    parts.append(f"↑{fmt_k(s['in'])} ↓{fmt_k(s['out'])}")
 
 total_cur = s["in"] + s["cache_read"] + s["cache_create"]
 if total_cur > 0:
     rate = s["cache_read"] * 100 / total_cur
-    parts.append(f"cache:{rate:.0f}%")
+    parts.append(f"cache:{rate:.1f}%")
 
 cost = calc_cost(model, s["in"], s["cache_read"], s["cache_create"], s["out"])
 if cost > 0:
