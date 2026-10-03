@@ -2,6 +2,8 @@
 
 Claude Code 状态栏（statusline）小工具：在 CLI 底部实时显示**模型、上下文使用率、token 用量、缓存命中率、花费金额**。
 
+> **适用场景**：本工具面向**通过 DeepSeek API（Anthropic 兼容端点）驱动 Claude Code** 的用户——`cost` 字段按 DeepSeek 官方定价折算（含峰谷时段），只有在这套组合下金额才准确。若使用其他端点或非 DeepSeek 模型，模型名 / `ctx` / token / `cache` 仍可正常显示，但 `cost` 会按 DeepSeek 价格误算，请忽略或自行修改脚本中的 `PRICES`。
+
 ```
 [deepseek-flash[1m] ctx:23.2% ↑249.8k ↓193.5k cache:98.6% cost:¥1.37]
 ```
